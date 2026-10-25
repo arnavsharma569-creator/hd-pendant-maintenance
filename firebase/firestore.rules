@@ -56,7 +56,83 @@ service cloud.firestore {
       allow delete: if false; // soft-delete only — set deletedAt field instead
     }
 
-    // Add new collection rules above this comment using the /firebase-collection skill.
+    // Maintenance writes use the client SDK, so these rules are the server-side authority.
+    function validTransition(before, after) {
+      return (before == 'OPEN' && after == 'IN_PROGRESS')
+        || (before == 'IN_PROGRESS' && after == 'COMPLETED');
+    }
+
+    function validMaintenance(data) {
+      return data.keys().hasAll(['pendantId', 'problemType', 'description', 'status',
+          'createdBy', 'createdAt', 'updatedAt', 'lastHistoryId', '_schemaVersion'])
+        && data.keys().hasOnly(['pendantId', 'problemType', 'description', 'status',
+          'createdBy', 'createdAt', 'updatedAt', 'lastHistoryId', '_schemaVersion'])
+        && data.pendantId in ['P001', 'P002', 'P003', 'P004', 'P005']
+        && data.problemType in ['NO_SIGNAL', 'BATTERY', 'DAMAGE', 'OTHER']
+        && data.description is string
+        && data.description.size() >= 10 && data.description.size() <= 500
+        && data.description.matches('[\\s\\S]*[^\\s][\\s\\S]*')
+        && data.status in ['OPEN', 'IN_PROGRESS', 'COMPLETED']
+        && data.createdBy == request.auth.uid
+        && data.createdAt is timestamp && data.updatedAt is timestamp
+        && data.lastHistoryId is string && data._schemaVersion == 1;
+    }
+
+    function matchingHistory(requestId, beforeStatus, data) {
+      let entryPath = /databases/$(database)/documents/statusHistory/$(data.lastHistoryId);
+      let entry = getAfter(entryPath).data;
+      return data.lastHistoryId == requestId + '_' + data.status
+        && !exists(entryPath)
+        && entry.requestId == requestId
+        && entry.fromStatus == beforeStatus && entry.toStatus == data.status
+        && entry.changedBy == request.auth.uid && entry.changedAt == request.time;
+    }
+
+    match /maintenanceRequests/{requestId} {
+      allow read: if isAuthenticated() && resource.data.createdBy == request.auth.uid;
+      allow create: if isAuthenticated() && validMaintenance(request.resource.data)
+        && request.resource.data.status == 'OPEN'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && matchingHistory(requestId, null, request.resource.data);
+      allow update: if isAuthenticated() && resource.data.createdBy == request.auth.uid
+        && validMaintenance(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'updatedAt', 'lastHistoryId'])
+        && validTransition(resource.data.status, request.resource.data.status)
+        && request.resource.data.updatedAt == request.time
+        && matchingHistory(requestId, resource.data.status, request.resource.data);
+      allow delete: if false;
+    }
+
+    function matchingRequest(entryId, entry) {
+      let parentPath = /databases/$(database)/documents/maintenanceRequests/$(entry.requestId);
+      let parent = getAfter(parentPath).data;
+      return parent.createdBy == request.auth.uid
+        && parent.lastHistoryId == entryId && parent.status == entry.toStatus
+        && parent.updatedAt == request.time
+        && ((!exists(parentPath) && entry.fromStatus == null && entry.toStatus == 'OPEN')
+          || (exists(parentPath)
+            && get(parentPath).data.status == entry.fromStatus
+            && validTransition(entry.fromStatus, entry.toStatus)));
+    }
+
+    match /statusHistory/{entryId} {
+      allow read: if isAuthenticated() && resource.data.changedBy == request.auth.uid;
+      allow create: if isAuthenticated()
+        && request.resource.data.keys().hasAll(['requestId', 'fromStatus', 'toStatus',
+          'changedBy', 'changedAt', '_schemaVersion'])
+        && request.resource.data.keys().hasOnly(['requestId', 'fromStatus', 'toStatus',
+          'changedBy', 'changedAt', '_schemaVersion'])
+        && request.resource.data.requestId is string
+        && request.resource.data.changedBy == request.auth.uid
+        && request.resource.data.changedAt == request.time
+        && request.resource.data._schemaVersion == 1
+        && entryId == request.resource.data.requestId + '_' + request.resource.data.toStatus
+        && matchingRequest(entryId, request.resource.data);
+      allow update, delete: if false;
+    }
+
 
     // ── Default deny ───────────────────────────────────────────────────────
     match /{document=**} {
