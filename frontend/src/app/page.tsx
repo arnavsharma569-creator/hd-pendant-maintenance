@@ -3,7 +3,7 @@ import Link from 'next/link'
 
 export const metadata: Metadata = {
   title: 'Home',
-  description: 'Welcome to the app',
+  description: 'Report pendant issues and track maintenance requests',
 }
 
 export default function LandingPage() {
@@ -14,11 +14,8 @@ export default function LandingPage() {
           {process.env.NEXT_PUBLIC_APP_NAME ?? 'App'}
         </h1>
         <p className="max-w-md text-lg text-zinc-600 dark:text-zinc-400">
-          Your app description goes here. Edit{' '}
-          <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-sm dark:bg-zinc-800">
-            src/app/page.tsx
-          </code>{' '}
-          to get started.
+          Report issues for five demo pendants, track maintenance progress and view the history of
+          each request.
         </p>
       </div>
       <div className="flex gap-4">

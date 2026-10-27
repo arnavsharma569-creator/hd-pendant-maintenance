@@ -1,5 +1,9 @@
 import {
   collection,
+  onSnapshot,
+  query,
+  where,
+  type Unsubscribe,
   doc,
   runTransaction,
   serverTimestamp,
@@ -14,6 +18,8 @@ import {
   type MaintenanceRequest,
   type MaintenanceStatus,
   type RequestInput,
+  type StatusHistory,
+  STATUSES,
 } from './model'
 
 /** One batch creates both documents, or neither. Rules enforce the same invariant. */
@@ -84,4 +90,64 @@ export async function changeMaintenanceStatus(
       _schemaVersion: 1,
     })
   })
+}
+
+export type RequestRecord = MaintenanceRequest & { id: string; pending: boolean }
+export type HistoryRecord = StatusHistory & { id: string; pending: boolean }
+
+/** Owner filters are required by the rules; Firestore rules are not query filters. */
+export function watchMaintenanceRequests(
+  uid: string,
+  onChange: (rows: RequestRecord[]) => void,
+  onError: (error: Error) => void,
+  db: Firestore = getClientDb()
+): Unsubscribe {
+  const owned = query(collection(db, 'maintenanceRequests'), where('createdBy', '==', uid))
+  return onSnapshot(
+    owned,
+    { includeMetadataChanges: true },
+    (snapshot) => {
+      const rows = snapshot.docs.map((entry) => ({
+        ...(entry.data({ serverTimestamps: 'estimate' }) as MaintenanceRequest),
+        id: entry.id,
+        pending: entry.metadata.hasPendingWrites,
+      }))
+      // Small demo collection: sort locally to avoid requiring a composite index.
+      rows.sort(
+        (a, b) =>
+          (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0) ||
+          a.id.localeCompare(b.id)
+      )
+      onChange(rows)
+    },
+    onError
+  )
+}
+
+export function watchStatusHistory(
+  uid: string,
+  requestId: string,
+  onChange: (rows: HistoryRecord[]) => void,
+  onError: (error: Error) => void,
+  db: Firestore = getClientDb()
+): Unsubscribe {
+  const owned = query(
+    collection(db, 'statusHistory'),
+    where('changedBy', '==', uid),
+    where('requestId', '==', requestId)
+  )
+  return onSnapshot(
+    owned,
+    { includeMetadataChanges: true },
+    (snapshot) => {
+      const rows = snapshot.docs.map((entry) => ({
+        ...(entry.data({ serverTimestamps: 'estimate' }) as StatusHistory),
+        id: entry.id,
+        pending: entry.metadata.hasPendingWrites,
+      }))
+      rows.sort((a, b) => STATUSES.indexOf(a.toStatus) - STATUSES.indexOf(b.toStatus))
+      onChange(rows)
+    },
+    onError
+  )
 }
