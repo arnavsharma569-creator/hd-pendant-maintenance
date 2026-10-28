@@ -1,3 +1,4 @@
+// Check that the upgraded resolver still gives the login and signup forms field errors.
 import { describe, expect, it } from 'vitest'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { loginSchema, signupSchema } from '@/lib/validations/auth'

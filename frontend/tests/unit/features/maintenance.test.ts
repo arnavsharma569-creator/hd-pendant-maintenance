@@ -1,3 +1,4 @@
+// Check the form rules and the allowed status changes. No database is used here.
 import { describe, expect, it } from 'vitest'
 import { isAllowedTransition, requestInputSchema } from '@/features/maintenance/model'
 
