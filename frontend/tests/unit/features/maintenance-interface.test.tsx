@@ -74,19 +74,15 @@ describe('request interface', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Write rejected')
     expect(screen.getByLabelText('Description')).toHaveValue(request.description)
   })
-  it('prevents another submission while database confirmation is pending', async () => {
-    let finish!: (id: string) => void
-    vi.mocked(createMaintenanceRequest).mockReturnValue(
-      new Promise((resolve) => {
-        finish = resolve
-      })
-    )
+  it('prevents another submission while database confirmation is pending', () => {
+    // Leave the save unfinished so we can check the disabled button.
+    vi.mocked(createMaintenanceRequest).mockReturnValue(new Promise(() => {}))
     render(<RequestForm uid="alice" online />)
     fillForm()
     fireEvent.click(screen.getByRole('button', { name: 'Create request' }))
+    expect(screen.getByRole('button', { name: 'Saving request…' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Saving request…' }))
     expect(createMaintenanceRequest).toHaveBeenCalledTimes(1)
-    await act(async () => finish('request-a'))
   })
   it('uses the displayed status as the transaction precondition', async () => {
     vi.mocked(changeMaintenanceStatus).mockResolvedValue(undefined)

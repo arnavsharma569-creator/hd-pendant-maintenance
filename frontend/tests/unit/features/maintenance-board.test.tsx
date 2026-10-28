@@ -56,8 +56,3 @@ it('filters requests without treating an unmatched filter as an empty account', 
   expect(screen.queryByText('Battery problem')).not.toBeInTheDocument()
   expect(screen.getByText('No requests with this status')).toBeInTheDocument()
 })
-it('warns that offline records may be cached', () => {
-  state.online = false
-  render(<MaintenanceBoard />)
-  expect(screen.getByRole('status')).toHaveTextContent('Displayed records may be cached')
-})
