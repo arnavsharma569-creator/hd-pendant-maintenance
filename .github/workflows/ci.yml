@@ -4,7 +4,8 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, feature/maintenance-requests]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -19,7 +20,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 10.34.9
 
       - uses: actions/setup-node@v4
         with:
@@ -38,6 +39,9 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      - name: Production build
+        run: pnpm run build
+
   test-frontend:
     name: Frontend Tests
     runs-on: ubuntu-latest
@@ -46,7 +50,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 10.34.9
 
       - uses: actions/setup-node@v4
         with:
@@ -67,7 +71,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 10.34.9
 
       - uses: actions/setup-node@v4
         with:
@@ -88,7 +92,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 10.34.9
 
       - uses: actions/setup-node@v4
         with:
