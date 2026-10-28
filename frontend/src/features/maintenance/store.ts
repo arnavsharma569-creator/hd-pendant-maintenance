@@ -22,7 +22,14 @@ import {
   STATUSES,
 } from './model'
 
-/** One batch creates both documents, or neither. Rules enforce the same invariant. */
+// Development messages identify the step without printing user data or credentials.
+export function debugMaintenance(message: string): void {
+  if (process.env.NODE_ENV === 'development') {
+    console.debug(`[maintenance] ${message}`)
+  }
+}
+
+// Save the request and its first history entry together. If one fails, neither is saved.
 export async function createMaintenanceRequest(
   uid: string,
   input: RequestInput,
@@ -32,6 +39,7 @@ export async function createMaintenanceRequest(
   const parsed = requestInputSchema.parse(input)
   const requestRef = doc(collection(db, 'maintenanceRequests'))
   const entryId = historyId(requestRef.id, 'OPEN')
+  debugMaintenance('Saving request and initial history')
   const batch = writeBatch(db)
   batch.set(requestRef, {
     ...parsed,
@@ -50,11 +58,17 @@ export async function createMaintenanceRequest(
     changedAt: serverTimestamp(),
     _schemaVersion: 1,
   })
-  await batch.commit()
+  try {
+    await batch.commit()
+    debugMaintenance('Request and initial history saved')
+  } catch (error) {
+    debugMaintenance('Request save failed')
+    throw error
+  }
   return requestRef.id
 }
 
-/** Read inside a transaction so simultaneous status changes cannot overwrite each other. */
+// Read the latest status before changing it and adding the matching history entry.
 export async function changeMaintenanceStatus(
   uid: string,
   requestId: string,
@@ -64,38 +78,45 @@ export async function changeMaintenanceStatus(
 ): Promise<void> {
   if (!uid) throw new Error('Sign in to update a request.')
   const requestRef = doc(db, 'maintenanceRequests', requestId)
-  await runTransaction(db, async (transaction) => {
-    const snapshot = await transaction.get(requestRef)
-    if (!snapshot.exists()) throw new Error('This request no longer exists.')
-    const current = snapshot.data() as MaintenanceRequest
-    if (current.createdBy !== uid) throw new Error('You can only update your own requests.')
-    if (current.status !== expectedStatus) {
-      throw new Error('This request has changed. Check its current status and try again.')
-    }
-    if (!isAllowedTransition(current.status, nextStatus)) {
-      throw new Error('That status change is not allowed.')
-    }
-    const entryId = historyId(requestId, nextStatus)
-    transaction.update(requestRef, {
-      status: nextStatus,
-      updatedAt: serverTimestamp(),
-      lastHistoryId: entryId,
+  debugMaintenance('Updating request status and history')
+  try {
+    await runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(requestRef)
+      if (!snapshot.exists()) throw new Error('This request no longer exists.')
+      const current = snapshot.data() as MaintenanceRequest
+      if (current.createdBy !== uid) throw new Error('You can only update your own requests.')
+      if (current.status !== expectedStatus) {
+        throw new Error('This request has changed. Check its current status and try again.')
+      }
+      if (!isAllowedTransition(current.status, nextStatus)) {
+        throw new Error('That status change is not allowed.')
+      }
+      const entryId = historyId(requestId, nextStatus)
+      transaction.update(requestRef, {
+        status: nextStatus,
+        updatedAt: serverTimestamp(),
+        lastHistoryId: entryId,
+      })
+      transaction.set(doc(db, 'statusHistory', entryId), {
+        requestId,
+        fromStatus: current.status,
+        toStatus: nextStatus,
+        changedBy: uid,
+        changedAt: serverTimestamp(),
+        _schemaVersion: 1,
+      })
     })
-    transaction.set(doc(db, 'statusHistory', entryId), {
-      requestId,
-      fromStatus: current.status,
-      toStatus: nextStatus,
-      changedBy: uid,
-      changedAt: serverTimestamp(),
-      _schemaVersion: 1,
-    })
-  })
+    debugMaintenance('Status and history updated')
+  } catch (error) {
+    debugMaintenance('Status update failed')
+    throw error
+  }
 }
 
 export type RequestRecord = MaintenanceRequest & { id: string; pending: boolean }
 export type HistoryRecord = StatusHistory & { id: string; pending: boolean }
 
-/** Owner filters are required by the rules; Firestore rules are not query filters. */
+// Ask for this user’s requests only. Firestore rules do not filter the query for us.
 export function watchMaintenanceRequests(
   uid: string,
   onChange: (rows: RequestRecord[]) => void,
@@ -131,6 +152,7 @@ export function watchStatusHistory(
   onError: (error: Error) => void,
   db: Firestore = getClientDb()
 ): Unsubscribe {
+  // Read history for this request and user, then show it in status order.
   const owned = query(
     collection(db, 'statusHistory'),
     where('changedBy', '==', uid),
